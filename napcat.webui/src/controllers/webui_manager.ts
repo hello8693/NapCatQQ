@@ -160,4 +160,25 @@ export default class WebUIManager {
 
     return eventSource
   }
+
+  // 安全配置相关方法
+  public static async getSecurityConfig() {
+    const { data } = await serverRequest.get<ServerResponse<any>>('/Security/config')
+    return data.data
+  }
+
+  public static async updateSecurityConfig(config: any) {
+    const { data } = await serverRequest.post<ServerResponse<string>>('/Security/config', config)
+    return data.data
+  }
+
+  public static async generateSecureToken() {
+    const { data } = await serverRequest.post<ServerResponse<{ token: string }>>('/Security/generate-token')
+    return data.data
+  }
+
+  public static async getSecurityStatus() {
+    const { data } = await serverRequest.get<ServerResponse<any>>('/Security/status')
+    return data.data
+  }
 }

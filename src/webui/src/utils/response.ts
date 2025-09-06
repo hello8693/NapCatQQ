@@ -21,16 +21,16 @@ export const sendResponse = <T>(
     res.status(HttpStatusCode.OK).json(result);
 };
 
-export const sendError = (res: Response, message = 'error', useSend: boolean = false) => {
+export const sendError = (res: Response, message = 'error', useSend: boolean = false, statusCode: number = HttpStatusCode.OK) => {
     const result = {
         code: ResponseCode.Error,
         message,
     };
     if (useSend) {
-        res.status(HttpStatusCode.OK).send(JSON.stringify(result));
+        res.status(statusCode).send(JSON.stringify(result));
         return;
     }
-    res.status(HttpStatusCode.OK).json(result);
+    res.status(statusCode).json(result);
 };
 
 export const sendSuccess = <T>(res: Response, data?: T, message = 'success', useSend: boolean = false) => {

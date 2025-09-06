@@ -1,7 +1,16 @@
 {
-    "host": "0.0.0.0",
+    "host": "127.0.0.1",
     "port": 6099,
     "prefix": "",
     "token": "random",
-    "loginRate": 3
+    "loginRate": 3,
+    "security": {
+        "allowedIPs": [],
+        "lockoutDuration": 30,
+        "maxFailedAttempts": 5,
+        "enableSecurityHeaders": true,
+        "minTokenLength": 16,
+        "forceHTTPS": false,
+        "allowedOrigins": []
+    }
 }

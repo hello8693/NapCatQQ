@@ -10,6 +10,7 @@ import { NapCatPathWrapper } from '@/common/path';
 import { WebUiConfigWrapper } from '@webapi/helper/config';
 import { ALLRouter } from '@webapi/router';
 import { cors } from '@webapi/middleware/cors';
+import { securityHeaders, ipWhitelist, accountLockout } from '@webapi/middleware/security';
 import { createUrl } from '@webapi/utils/url';
 import { sendError } from '@webapi/utils/response';
 import { join } from 'node:path';
@@ -83,6 +84,15 @@ export async function InitWebUi(logger: LogWrapper, pathWrapper: NapCatPathWrapp
             }
         });
     // ------------注册中间件------------
+    // 安全头中间件（最先执行）
+    app.use(securityHeaders);
+    
+    // IP白名单中间件
+    app.use(ipWhitelist);
+    
+    // 账户锁定中间件（仅对登录请求）
+    app.use(accountLockout);
+    
     // 使用express的json中间件
     app.use(express.json());
 
