@@ -2,23 +2,46 @@ import { webUiPathWrapper } from '@/webui';
 import { Type, Static } from '@sinclair/typebox';
 import Ajv from 'ajv';
 import fs, { constants } from 'node:fs/promises';
+import crypto from 'node:crypto';
 
 import { resolve } from 'node:path';
 
 import { deepMerge } from '../utils/object';
 import { themeType } from '../types/theme';
 
+// 生成安全的随机令牌
+function generateSecureToken(): string {
+    return crypto.randomBytes(32).toString('hex');
+}
+
 // 限制尝试端口的次数，避免死循环
 // 定义配置的类型
 const WebUiConfigSchema = Type.Object({
     host: Type.String({ default: '0.0.0.0' }),
     port: Type.Number({ default: 6099 }),
-    // napcat+<月份日时>，例如 napcat062511
-    token: Type.String({ default: 'napcat' + (new Date().getMonth() + 1).toString().padStart(2, '0') + new Date().getDate().toString().padStart(2, '0') + new Date().getHours().toString().padStart(2, '0') }),
+    // 使用安全的随机令牌代替可预测的时间戳
+    token: Type.String({ default: generateSecureToken() }),
     loginRate: Type.Number({ default: 10 }),
     autoLoginAccount: Type.String({ default: '' }),
     theme: themeType,
     defaultToken: Type.Boolean({ default: true }),
+    // 新增安全配置选项
+    security: Type.Optional(Type.Object({
+        // IP白名单，空数组表示允许所有IP
+        allowedIPs: Type.Array(Type.String(), { default: [] }),
+        // 失败尝试后的锁定时间（分钟）
+        lockoutDuration: Type.Number({ default: 30 }),
+        // 触发锁定的最大失败次数
+        maxFailedAttempts: Type.Number({ default: 5 }),
+        // 是否启用安全头
+        enableSecurityHeaders: Type.Boolean({ default: true }),
+        // 令牌最小长度要求
+        minTokenLength: Type.Number({ default: 16 }),
+        // 是否强制HTTPS（当有证书时）
+        forceHTTPS: Type.Boolean({ default: false }),
+        // CORS允许的域名列表，空数组表示允许所有域名
+        allowedOrigins: Type.Array(Type.String(), { default: [] }),
+    }, { default: {} })),
 });
 
 export type WebUiConfigType = Static<typeof WebUiConfigSchema>;
@@ -30,6 +53,24 @@ export class WebUiConfigWrapper {
     private validateAndApplyDefaults(config: Partial<WebUiConfigType>): WebUiConfigType {
         new Ajv({ coerceTypes: true, useDefaults: true }).compile(WebUiConfigSchema)(config);
         return config as WebUiConfigType;
+    }
+
+    private validateTokenComplexity(token: string, minLength: number = 16): boolean {
+        if (token.length < minLength) {
+            return false;
+        }
+        
+        // 检查是否包含至少一个数字、一个字母
+        const hasNumber = /\d/.test(token);
+        const hasLetter = /[a-zA-Z]/.test(token);
+        
+        // 如果是十六进制字符串（如随机生成的token），只需要检查长度
+        const isHex = /^[a-fA-F0-9]+$/.test(token);
+        if (isHex && token.length >= minLength) {
+            return true;
+        }
+        
+        return hasNumber && hasLetter;
     }
 
     private async ensureConfigFileExists(configPath: string): Promise<void> {
@@ -89,6 +130,13 @@ export class WebUiConfigWrapper {
         if (currentConfig.token !== oldToken) {
             throw new Error('旧 token 不匹配');
         }
+        
+        // 验证新token的复杂度
+        const minLength = currentConfig.security?.minTokenLength || 16;
+        if (!this.validateTokenComplexity(newToken, minLength)) {
+            throw new Error(`新 token 不符合安全要求：最少${minLength}个字符，且包含字母和数字`);
+        }
+        
         await this.UpdateWebUIConfig({ token: newToken, defaultToken: false });
     }
 
@@ -176,5 +224,57 @@ export class WebUiConfigWrapper {
     // 更新主题内容
     async UpdateTheme(theme: WebUiConfigType['theme']): Promise<void> {
         await this.UpdateWebUIConfig({ theme: theme });
+    }
+
+    // 获取安全配置
+    async GetSecurityConfig(): Promise<WebUiConfigType['security']> {
+        const config = await this.GetWebUIConfig();
+        return config.security || {
+            allowedIPs: [],
+            lockoutDuration: 30,
+            maxFailedAttempts: 5,
+            enableSecurityHeaders: true,
+            minTokenLength: 16,
+            forceHTTPS: false,
+            allowedOrigins: [],
+        };
+    }
+
+    // 更新安全配置
+    async UpdateSecurityConfig(securityConfig: Partial<NonNullable<WebUiConfigType['security']>>): Promise<void> {
+        const currentConfig = await this.GetWebUIConfig();
+        const currentSecurity = currentConfig.security || {
+            allowedIPs: [],
+            lockoutDuration: 30,
+            maxFailedAttempts: 5,
+            enableSecurityHeaders: true,
+            minTokenLength: 16,
+            forceHTTPS: false,
+            allowedOrigins: [],
+        };
+        const updatedSecurity = { ...currentSecurity, ...securityConfig };
+        await this.UpdateWebUIConfig({ security: updatedSecurity });
+    }
+
+    // 检查IP是否在白名单中
+    async IsIPAllowed(ip: string): Promise<boolean> {
+        const securityConfig = await this.GetSecurityConfig();
+        if (!securityConfig || !securityConfig.allowedIPs || securityConfig.allowedIPs.length === 0) {
+            return true; // 如果没有配置白名单，允许所有IP
+        }
+        
+        // 支持IP段匹配（简单实现）
+        return securityConfig.allowedIPs.some(allowedIP => {
+            if (allowedIP.includes('/')) {
+                // CIDR notation support could be added here
+                return false;
+            }
+            if (allowedIP.includes('*')) {
+                // 通配符支持
+                const pattern = allowedIP.replace(/\*/g, '.*');
+                return new RegExp(`^${pattern}$`).test(ip);
+            }
+            return allowedIP === ip;
+        });
     }
 }

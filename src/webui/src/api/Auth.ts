@@ -6,6 +6,7 @@ import { AuthHelper } from '@webapi/helper/SignToken';
 import { WebUiDataRuntime } from '@webapi/helper/Data';
 import { sendSuccess, sendError } from '@webapi/utils/response';
 import { isEmpty } from '@webapi/utils/check';
+import { recordFailedLogin, clearFailedLoginAttempts } from '@webapi/middleware/security';
 
 // 检查是否使用默认Token
 export const CheckDefaultTokenHandler: RequestHandler = async (_, res) => {
@@ -27,16 +28,24 @@ export const LoginHandler: RequestHandler = async (req, res) => {
 
     // 如果token为空，返回错误信息
     if (isEmpty(hash)) {
+        await recordFailedLogin(clientIP);
         return sendError(res, 'token is empty');
     }
+    
     // 检查登录频率
     if (!WebUiDataRuntime.checkLoginRate(clientIP, WebUiConfigData.loginRate)) {
+        await recordFailedLogin(clientIP);
         return sendError(res, 'login rate limit');
     }
+    
     //验证config.token hash是否等于token hash
     if (!AuthHelper.comparePasswordHash(WebUiConfigData.token, hash)) {
+        await recordFailedLogin(clientIP);
         return sendError(res, 'token is invalid');
     }
+
+    // 登录成功，清除失败记录
+    await clearFailedLoginAttempts(clientIP);
 
     // 签发凭证
     const signCredential = Buffer.from(JSON.stringify(AuthHelper.signCredential(hash))).toString(
@@ -119,9 +128,17 @@ export const UpdateTokenHandler: RequestHandler = async (req, res) => {
             if (!currentConfig.defaultToken) {
                 return sendError(res, 'Current password is not default password');
             }
+            
+            // 验证新token的复杂度
+            const securityConfig = await WebUiConfig.GetSecurityConfig();
+            const minLength = securityConfig?.minTokenLength || 16;
+            if (newToken.length < minLength) {
+                return sendError(res, `New token must be at least ${minLength} characters long`);
+            }
+            
             await WebUiConfig.UpdateWebUIConfig({ token: newToken, defaultToken: false });
         } else {
-            // 正常的密码更新流程
+            // 正常的密码更新流程，UpdateToken方法内部包含复杂度验证
             await WebUiConfig.UpdateToken(oldToken, newToken);
         }
         
